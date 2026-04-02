@@ -2299,35 +2299,59 @@ def run_automation(mobile_num, otp_code, sections, wait_time=10):
                     chrome_binary = path
                     break
 
-        if chrome_binary and os.path.exists(chrome_binary):
-            options.binary_location = chrome_binary
-            progress_placeholder.info(f"🔧 Initializing headless browser using {chrome_binary}")
+        remote_url = os.environ.get('REMOTE_WEBDRIVER_URL')
+        if remote_url:
+            progress_placeholder.info(f"🔧 Initializing remote WebDriver at {remote_url}")
+            driver = webdriver.Remote(
+                command_executor=remote_url,
+                options=options
+            )
         else:
-            env_hint = ' or set CHROME_BINARY/CHROME_BIN/CHROME_PATH/GOOGLE_CHROME_SHIM'
-            detected = {
-                'CHROME_BINARY': os.environ.get('CHROME_BINARY'),
-                'CHROME_BIN': os.environ.get('CHROME_BIN'),
-                'CHROME_PATH': os.environ.get('CHROME_PATH'),
-                'GOOGLE_CHROME_SHIM': os.environ.get('GOOGLE_CHROME_SHIM'),
-                'which_google_chrome': shutil.which('google-chrome'),
-                'which_chromium': shutil.which('chromium'),
-                'which_chromium_browser': shutil.which('chromium-browser'),
-            }
-            progress_placeholder.error(
-                "Chrome/Chromium executable not found. "
-                f"Set an environment variable{env_hint} to the browser path, or install Chromium in the container."
-            )
-            progress_placeholder.write("Detected values:\n" + "\n".join(
-                f"{k}: {v}" for k, v in detected.items()
-            ))
-            raise RuntimeError(
-                "Chrome/Chromium binary not found for Selenium headless mode."
-            )
+            if chrome_binary and os.path.exists(chrome_binary):
+                options.binary_location = chrome_binary
+                progress_placeholder.info(f"🔧 Initializing headless browser using {chrome_binary}")
+            else:
+                env_hint = ' or set CHROME_BINARY/CHROME_BIN/CHROME_PATH/GOOGLE_CHROME_SHIM'
+                detected = {
+                    'CHROME_BINARY': os.environ.get('CHROME_BINARY'),
+                    'CHROME_BIN': os.environ.get('CHROME_BIN'),
+                    'CHROME_PATH': os.environ.get('CHROME_PATH'),
+                    'GOOGLE_CHROME_SHIM': os.environ.get('GOOGLE_CHROME_SHIM'),
+                    'which_google_chrome': shutil.which('google-chrome'),
+                    'which_chrome': shutil.which('chrome'),
+                    'which_chromium': shutil.which('chromium'),
+                    'which_chromium_browser': shutil.which('chromium-browser'),
+                }
 
-        driver = webdriver.Chrome(
-            service=Service(ChromeDriverManager().install()),
-            options=options
-        )
+                if os.name == 'nt':
+                    windows_paths = [
+                        os.path.join(os.environ.get('PROGRAMFILES', ''), 'Google', 'Chrome', 'Application', 'chrome.exe'),
+                        os.path.join(os.environ.get('PROGRAMFILES(X86)', ''), 'Google', 'Chrome', 'Application', 'chrome.exe'),
+                        os.path.join(os.environ.get('LOCALAPPDATA', ''), 'Google', 'Chrome', 'Application', 'chrome.exe'),
+                    ]
+                    for path in windows_paths:
+                        if path and os.path.exists(path):
+                            chrome_binary = path
+                            options.binary_location = chrome_binary
+                            progress_placeholder.info(f"🔧 Initializing headless browser using {chrome_binary}")
+                            break
+
+                if not chrome_binary and os.name != 'nt':
+                    progress_placeholder.error(
+                        "Chrome/Chromium executable not found. "
+                        f"Set an environment variable{env_hint} to the browser path, or install Chromium in the container."
+                    )
+                    progress_placeholder.write("Detected values:\n" + "\n".join(
+                        f"{k}: {v}" for k, v in detected.items()
+                    ))
+                    raise RuntimeError(
+                        "Chrome/Chromium binary not found for Selenium headless mode."
+                    )
+
+            driver = webdriver.Chrome(
+                service=Service(ChromeDriverManager().install()),
+                options=options
+            )
         driver.set_page_load_timeout(60)
         driver.implicitly_wait(2)
         wait = WebDriverWait(driver, wait_time)
