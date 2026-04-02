@@ -350,6 +350,45 @@ def find_and_click(driver, xpath, timeout=8):
     except:
         return False
 
+def click_text_button(driver, text_fragments):
+    if isinstance(text_fragments, str):
+        text_fragments = [text_fragments]
+    lowered = [t.lower() for t in text_fragments if t]
+    if not lowered:
+        return False
+    return bool(driver.execute_script("""
+        var frags = arguments[0];
+        var nodes = document.querySelectorAll('button, a, div[role="button"], span');
+        for (var i = 0; i < nodes.length; i++) {
+            var n = nodes[i];
+            if (!n || !n.offsetParent) continue;
+            var txt = (n.innerText || n.textContent || '').trim().toLowerCase();
+            if (!txt) continue;
+            var ok = true;
+            for (var j = 0; j < frags.length; j++) {
+                if (txt.indexOf(frags[j]) === -1) { ok = false; break; }
+            }
+            if (ok) {
+                n.scrollIntoView({block:'center'});
+                n.click();
+                return true;
+            }
+        }
+        return false;
+    """, lowered))
+
+
+def builder_ready(driver):
+    return poll_element_visible(
+        driver,
+        "//*[contains(.,'Select Section Type')] | "
+        "//label[contains(text(),'Name of Section')] | "
+        "//label[contains(text(),'Name of section')] | "
+        "//*[contains(.,'Add Questions')] | "
+        "//*[contains(.,'Question Library')]",
+        timeout=1.0
+    )
+
 
 # ============================================================
 # POPUP STATE HELPERS
@@ -2607,18 +2646,44 @@ def run_automation(mobile_num, otp_code, sections, wait_time=10):
         progress_placeholder.success("✅ Login Successful!")
 
         progress_placeholder.info("🚀 Step 3: Navigating to Create Assessment...")
-        find_and_click(
+        ca_clicked = find_and_click(
             driver, "//*[contains(text(), 'Create Assessment')]", timeout=wait_time)
-        find_and_click(
+        if not ca_clicked:
+            ca_clicked = click_text_button(driver, ["create", "assessment"])
+        if not ca_clicked:
+            raise RuntimeError("Could not click 'Create Assessment'")
+
+        custom_clicked = find_and_click(
             driver, "//*[contains(text(), 'Custom Assessment')]", timeout=wait_time)
+        if not custom_clicked:
+            custom_clicked = click_text_button(driver, ["custom", "assessment"])
+        if not custom_clicked:
+            raise RuntimeError("Could not click 'Custom Assessment'")
 
         progress_placeholder.info("➕ Step 4: Creating Section 1...")
-        find_and_click(driver,
+        sec_clicked = find_and_click(driver,
             "//*[contains(text(),'Create new Section') or "
             "contains(text(),'Create New Section')]",
             timeout=wait_time)
+        if not sec_clicked:
+            sec_clicked = click_text_button(driver, ["create", "section"])
+        if not sec_clicked:
+            raise RuntimeError("Could not click 'Create New Section'")
 
         handle_subject_selection(driver, progress_placeholder)
+
+        if not builder_ready(driver):
+            # One recovery attempt: sometimes section button click is swallowed.
+            progress_placeholder.warning("⚠️ Builder not ready after section click; retrying once...")
+            sec_clicked = find_and_click(driver,
+                "//*[contains(text(),'Create new Section') or contains(text(),'Create New Section')]",
+                timeout=4)
+            if not sec_clicked:
+                sec_clicked = click_text_button(driver, ["create", "section"])
+            if not builder_ready(driver):
+                raise RuntimeError(
+                    "Not in section builder screen (still on dashboard or wrong page state)."
+                )
 
         sec1_type = sections[0]["section_type"]
         progress_placeholder.info(f"🎯 Selecting type for Section 1: '{sec1_type}'")
