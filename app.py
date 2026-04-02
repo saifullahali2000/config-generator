@@ -2312,6 +2312,10 @@ def run_automation(mobile_num, otp_code, sections, wait_time=10):
                         chrome_binary = found
                         break
 
+        progress_placeholder.write(
+            f"Browser detection: os.name={os.name}, chrome_binary={chrome_binary!r}"
+        )
+
         remote_url = os.environ.get('REMOTE_WEBDRIVER_URL')
         if remote_url:
             progress_placeholder.info(f"🔧 Initializing remote WebDriver at {remote_url}")
