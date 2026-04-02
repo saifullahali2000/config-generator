@@ -389,6 +389,62 @@ def builder_ready(driver):
         timeout=1.0
     )
 
+def debug_visible_actions(driver):
+    try:
+        return driver.execute_script("""
+            var out = [];
+            var nodes = document.querySelectorAll('button, a, div[role="button"]');
+            for (var i = 0; i < nodes.length; i++) {
+                var n = nodes[i];
+                if (!n || !n.offsetParent) continue;
+                var txt = (n.innerText || n.textContent || '').trim().replace(/\\s+/g, ' ');
+                if (!txt) continue;
+                if (out.indexOf(txt) === -1) out.push(txt);
+                if (out.length >= 20) break;
+            }
+            return out;
+        """)
+    except:
+        return []
+
+
+def open_assessment_builder(driver, wait_time, progress_placeholder):
+    create_assessment_xpaths = [
+        "//*[contains(text(), 'Create Assessment')]",
+        "//*[contains(translate(text(),'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'create assessment')]",
+        "//a[contains(@href,'assessment') and contains(@href,'create')]",
+    ]
+    custom_assessment_xpaths = [
+        "//*[contains(text(), 'Custom Assessment')]",
+        "//*[contains(translate(text(),'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'custom assessment')]",
+        "//a[contains(@href,'custom') and contains(@href,'assessment')]",
+    ]
+
+    for xp in create_assessment_xpaths:
+        if find_and_click(driver, xp, timeout=4):
+            break
+    else:
+        if not click_text_button(driver, ["create", "assessment"]):
+            btns = debug_visible_actions(driver)
+            progress_placeholder.write(f"Visible actions near Step 3: {btns}")
+            raise RuntimeError("Could not click 'Create Assessment'")
+
+    poll_element_visible(driver, "//*[contains(.,'Assessment')]", timeout=2.0)
+
+    for xp in custom_assessment_xpaths:
+        if find_and_click(driver, xp, timeout=4):
+            return
+    if click_text_button(driver, ["custom", "assessment"]):
+        return
+
+    # Fallback: try any "custom" action if exact wording differs.
+    if click_text_button(driver, ["custom"]):
+        return
+
+    btns = debug_visible_actions(driver)
+    progress_placeholder.write(f"Visible actions after Create Assessment: {btns}")
+    raise RuntimeError("Could not click 'Custom Assessment'")
+
 
 # ============================================================
 # POPUP STATE HELPERS
@@ -2646,19 +2702,7 @@ def run_automation(mobile_num, otp_code, sections, wait_time=10):
         progress_placeholder.success("✅ Login Successful!")
 
         progress_placeholder.info("🚀 Step 3: Navigating to Create Assessment...")
-        ca_clicked = find_and_click(
-            driver, "//*[contains(text(), 'Create Assessment')]", timeout=wait_time)
-        if not ca_clicked:
-            ca_clicked = click_text_button(driver, ["create", "assessment"])
-        if not ca_clicked:
-            raise RuntimeError("Could not click 'Create Assessment'")
-
-        custom_clicked = find_and_click(
-            driver, "//*[contains(text(), 'Custom Assessment')]", timeout=wait_time)
-        if not custom_clicked:
-            custom_clicked = click_text_button(driver, ["custom", "assessment"])
-        if not custom_clicked:
-            raise RuntimeError("Could not click 'Custom Assessment'")
+        open_assessment_builder(driver, wait_time, progress_placeholder)
 
         progress_placeholder.info("➕ Step 4: Creating Section 1...")
         sec_clicked = find_and_click(driver,
