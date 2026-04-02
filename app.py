@@ -2369,10 +2369,24 @@ def run_automation(mobile_num, otp_code, sections, wait_time=10):
                         "Chrome/Chromium binary not found for Selenium headless mode."
                     )
 
-            driver = webdriver.Chrome(
-                service=Service(ChromeDriverManager().install()),
-                options=options
+            chromedriver_path = (
+                os.environ.get("CHROMEDRIVER_PATH")
+                or shutil.which("chromedriver")
+                or shutil.which("chromium-driver")
+                or ("/usr/bin/chromedriver" if os.path.exists("/usr/bin/chromedriver") else None)
             )
+
+            if chromedriver_path:
+                progress_placeholder.info(f"🔧 Using system ChromeDriver: {chromedriver_path}")
+                service = Service(chromedriver_path)
+            else:
+                progress_placeholder.warning(
+                    "⚠️ System ChromeDriver not found; falling back to webdriver_manager download. "
+                    "If you see a Chrome/Driver version mismatch, install `chromium-driver` or set CHROMEDRIVER_PATH."
+                )
+                service = Service(ChromeDriverManager().install())
+
+            driver = webdriver.Chrome(service=service, options=options)
         driver.set_page_load_timeout(60)
         driver.implicitly_wait(2)
         wait = WebDriverWait(driver, wait_time)
