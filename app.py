@@ -1,4 +1,5 @@
 import os
+import shutil
 import streamlit as st
 import pandas as pd
 import time
@@ -2303,10 +2304,22 @@ def run_automation(mobile_num, otp_code, sections, wait_time=10):
             progress_placeholder.info(f"🔧 Initializing headless browser using {chrome_binary}")
         else:
             env_hint = ' or set CHROME_BINARY/CHROME_BIN/CHROME_PATH/GOOGLE_CHROME_SHIM'
+            detected = {
+                'CHROME_BINARY': os.environ.get('CHROME_BINARY'),
+                'CHROME_BIN': os.environ.get('CHROME_BIN'),
+                'CHROME_PATH': os.environ.get('CHROME_PATH'),
+                'GOOGLE_CHROME_SHIM': os.environ.get('GOOGLE_CHROME_SHIM'),
+                'which_google_chrome': shutil.which('google-chrome'),
+                'which_chromium': shutil.which('chromium'),
+                'which_chromium_browser': shutil.which('chromium-browser'),
+            }
             progress_placeholder.error(
                 "Chrome/Chromium executable not found. "
                 f"Set an environment variable{env_hint} to the browser path, or install Chromium in the container."
             )
+            progress_placeholder.write("Detected values:\n" + "\n".join(
+                f"{k}: {v}" for k, v in detected.items()
+            ))
             raise RuntimeError(
                 "Chrome/Chromium binary not found for Selenium headless mode."
             )
