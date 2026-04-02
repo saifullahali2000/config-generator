@@ -2443,17 +2443,40 @@ def run_automation(mobile_num, otp_code, sections, wait_time=10):
         find_and_click(driver, "//button[contains(., 'Verify')]", timeout=wait_time)
         progress_placeholder.success("✅ Login Successful!")
 
+        def in_builder():
+            return poll_element_visible(
+                driver,
+                "//*[contains(.,'Select Section Type')] | "
+                "//label[contains(text(),'Name of Section')] | "
+                "//label[contains(text(),'Name of section')] | "
+                "//*[contains(.,'Add Questions')]",
+                timeout=1.0
+            )
+
         progress_placeholder.info("🚀 Step 3: Navigating to Create Assessment...")
-        find_and_click(
+        step3_ok = find_and_click(
             driver, "//*[contains(text(), 'Create Assessment')]", timeout=wait_time)
-        find_and_click(
-            driver, "//*[contains(text(), 'Custom Assessment')]", timeout=wait_time)
+        step3_ok = find_and_click(
+            driver, "//*[contains(text(), 'Custom Assessment')]", timeout=wait_time) and step3_ok
 
         progress_placeholder.info("➕ Step 4: Creating Section 1...")
-        find_and_click(driver,
+        step4_ok = find_and_click(driver,
             "//*[contains(text(),'Create new Section') or "
             "contains(text(),'Create New Section')]",
             timeout=wait_time)
+
+        if not (step3_ok and step4_ok and in_builder()):
+            progress_placeholder.warning("⚠️ Builder not ready after first navigation attempt; retrying...")
+            step3_ok = find_and_click(
+                driver, "//*[contains(text(), 'Create Assessment')]", timeout=6)
+            step3_ok = find_and_click(
+                driver, "//*[contains(text(), 'Custom Assessment')]", timeout=6) and step3_ok
+            step4_ok = find_and_click(driver,
+                "//*[contains(text(),'Create new Section') or "
+                "contains(text(),'Create New Section')]",
+                timeout=6)
+            if not (step3_ok and step4_ok and in_builder()):
+                raise RuntimeError("Not in section builder screen after login navigation.")
 
         handle_subject_selection(driver, progress_placeholder)
 
