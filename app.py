@@ -2058,6 +2058,43 @@ def click_save_and_next_button(driver, progress_placeholder):
     progress_placeholder.error("  ❌ Could not find or click 'Save & Next' button")
     return False
 
+def click_finalize_assessment_button(driver, progress_placeholder):
+    progress_placeholder.info("📌 Looking for final submit button (Create/Publish Assessment)...")
+    for attempt in range(10):
+        progress_placeholder.info(f"  🔍 Finalize attempt {attempt+1}/10")
+        time.sleep(0.2)
+        btn = driver.execute_script("""
+            var nodes = document.querySelectorAll('button, a, div[role="button"]');
+            for (var i = 0; i < nodes.length; i++) {
+                var n = nodes[i];
+                if (!n || !n.offsetParent) continue;
+                if (n.disabled) continue;
+                var txt = (n.innerText || n.textContent || '').trim().toLowerCase();
+                if (!txt) continue;
+                if (txt.includes('create assessment') || txt.includes('publish assessment') ||
+                    txt === 'publish' || txt.includes('create test')) {
+                    n.scrollIntoView({block:'center'});
+                    return n;
+                }
+            }
+            return null;
+        """)
+        if not btn:
+            continue
+        try:
+            from selenium.webdriver.common.action_chains import ActionChains
+            ActionChains(driver).move_to_element(btn).pause(0.05).click().perform()
+        except:
+            driver.execute_script("arguments[0].click();", btn)
+        # Any URL/state change indicates final action likely fired.
+        old_url = driver.current_url
+        poll_url_changed(driver, old_url, timeout=2.0)
+        progress_placeholder.success("  ✅ Final submit action clicked")
+        return True
+
+    progress_placeholder.warning("  ⚠️ Final submit button not found/clicked; leaving at final draft page")
+    return False
+
 
 # ============================================================
 # QUESTION LOOP
@@ -2420,6 +2457,9 @@ def automate_all_sections(driver, wait, sections, progress_placeholder):
                 f"🏁 Section {sec_num} is the LAST section — clicking 'Save & Next'")
             if not click_save_and_next_button(driver, progress_placeholder):
                 return False
+
+            # Some flows require one more explicit final create/publish click.
+            click_finalize_assessment_button(driver, progress_placeholder)
 
             progress_placeholder.info("🔗 Capturing final URL...")
             _old = driver.current_url
