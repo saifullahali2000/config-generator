@@ -1,5 +1,3 @@
-import os
-import shutil
 import streamlit as st
 import pandas as pd
 import time
@@ -349,144 +347,6 @@ def find_and_click(driver, xpath, timeout=8):
         return True
     except:
         return False
-
-def click_text_button(driver, text_fragments):
-    if isinstance(text_fragments, str):
-        text_fragments = [text_fragments]
-    lowered = [t.lower() for t in text_fragments if t]
-    if not lowered:
-        return False
-    return bool(driver.execute_script("""
-        var frags = arguments[0];
-        var nodes = document.querySelectorAll('button, a, div[role="button"], span');
-        for (var i = 0; i < nodes.length; i++) {
-            var n = nodes[i];
-            if (!n || !n.offsetParent) continue;
-            var txt = (n.innerText || n.textContent || '').trim().toLowerCase();
-            if (!txt) continue;
-            var ok = true;
-            for (var j = 0; j < frags.length; j++) {
-                if (txt.indexOf(frags[j]) === -1) { ok = false; break; }
-            }
-            if (ok) {
-                n.scrollIntoView({block:'center'});
-                n.click();
-                return true;
-            }
-        }
-        return false;
-    """, lowered))
-
-
-def builder_ready(driver):
-    return poll_element_visible(
-        driver,
-        "//*[contains(.,'Select Section Type')] | "
-        "//label[contains(text(),'Name of Section')] | "
-        "//label[contains(text(),'Name of section')] | "
-        "//*[contains(.,'Add Questions')] | "
-        "//*[contains(.,'Question Library')]",
-        timeout=1.0
-    )
-
-def debug_visible_actions(driver):
-    try:
-        return driver.execute_script("""
-            var out = [];
-            var nodes = document.querySelectorAll('button, a, div[role="button"]');
-            for (var i = 0; i < nodes.length; i++) {
-                var n = nodes[i];
-                if (!n || !n.offsetParent) continue;
-                var txt = (n.innerText || n.textContent || '').trim().replace(/\\s+/g, ' ');
-                if (!txt) continue;
-                if (out.indexOf(txt) === -1) out.push(txt);
-                if (out.length >= 20) break;
-            }
-            return out;
-        """)
-    except:
-        return []
-
-def switch_to_frame_with_assessment_actions(driver):
-    try:
-        driver.switch_to.default_content()
-    except:
-        pass
-    try:
-        if click_text_button(driver, ["create", "assessment"]):
-            return True
-    except:
-        pass
-
-    try:
-        frames = driver.find_elements(By.TAG_NAME, "iframe")
-    except:
-        frames = []
-
-    for i in range(len(frames)):
-        try:
-            driver.switch_to.default_content()
-            frames = driver.find_elements(By.TAG_NAME, "iframe")
-            if i >= len(frames):
-                continue
-            driver.switch_to.frame(frames[i])
-            if click_text_button(driver, ["create", "assessment"]):
-                return True
-        except:
-            continue
-    try:
-        driver.switch_to.default_content()
-    except:
-        pass
-    return False
-
-
-def open_assessment_builder(driver, wait_time, progress_placeholder):
-    # Let post-login SPA content settle before menu interactions.
-    time.sleep(1.5)
-    try:
-        progress_placeholder.write(
-            f"Step 3 context: url={driver.current_url}, title={driver.title}"
-        )
-    except:
-        pass
-
-    create_assessment_xpaths = [
-        "//*[contains(text(), 'Create Assessment')]",
-        "//*[contains(translate(text(),'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'create assessment')]",
-        "//a[contains(@href,'assessment') and contains(@href,'create')]",
-    ]
-    custom_assessment_xpaths = [
-        "//*[contains(text(), 'Custom Assessment')]",
-        "//*[contains(translate(text(),'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'custom assessment')]",
-        "//a[contains(@href,'custom') and contains(@href,'assessment')]",
-    ]
-
-    for xp in create_assessment_xpaths:
-        if find_and_click(driver, xp, timeout=4):
-            break
-    else:
-        if not click_text_button(driver, ["create", "assessment"]):
-            if not switch_to_frame_with_assessment_actions(driver):
-                btns = debug_visible_actions(driver)
-                progress_placeholder.write(f"Visible actions near Step 3: {btns}")
-                raise RuntimeError("Could not click 'Create Assessment'")
-
-    poll_element_visible(driver, "//*[contains(.,'Assessment')]", timeout=2.0)
-
-    for xp in custom_assessment_xpaths:
-        if find_and_click(driver, xp, timeout=4):
-            return
-    if click_text_button(driver, ["custom", "assessment"]):
-        return
-
-    # Fallback: try any "custom" action if exact wording differs.
-    if click_text_button(driver, ["custom"]):
-        return
-
-    btns = debug_visible_actions(driver)
-    progress_placeholder.write(f"Visible actions after Create Assessment: {btns}")
-    raise RuntimeError("Could not click 'Custom Assessment'")
 
 
 # ============================================================
@@ -1537,65 +1397,34 @@ def set_default_coding_language(driver, language, progress_placeholder):
 
 def select_section_type(driver, wait, target_section, progress_placeholder):
     progress_placeholder.info(f"🎯 Selecting section type: '{target_section}'...")
-    section_aliases = {
-        "mcq": ["mcq", "multiple choice", "multiple-choice", "objective"],
-        "textual": ["textual", "subjective", "descriptive", "essay"],
-        "coding": ["coding", "ide based coding", "ide coding"],
-        "sql": ["sql", "sql coding"],
-        "web coding": ["web coding", "frontend coding", "web"],
-    }
-    normalized = (target_section or "").strip().lower()
-    search_terms = section_aliases.get(normalized, [normalized, target_section])
-
-    def section_form_visible():
-        return poll_element_visible(
-            driver,
-            "//label[contains(text(),'Name of Section')] | "
-            "//label[contains(text(),'Name of section')] | "
-            "//input[@placeholder='Name of Section']",
-            timeout=0.6
-        )
-
     try:
         wait.until(EC.presence_of_element_located(
             (By.XPATH, "//*[contains(., 'Select Section Type')]")))
         progress_placeholder.info("  ✅ Section type modal loaded")
     except:
-        if section_form_visible():
-            progress_placeholder.info("  ℹ️ Section form already visible; section type likely selected")
-            return True
-        progress_placeholder.info("  ℹ️ Modal title not found; trying direct section click")
+        progress_placeholder.warning("  ⚠️ Could not confirm modal — continuing")
 
     clicked = False
-    xpaths = []
-    for term in search_terms:
-        if not term:
-            continue
-        xpaths.extend([
-            f"//*[translate(normalize-space(text()), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz')='{term.lower()}']",
-            f"//*[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '{term.lower()}')]",
-            f"//div[contains(@class,'card')]//*[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '{term.lower()}')]",
-            f"//button[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '{term.lower()}')]",
-            f"//div[@role='button'][contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '{term.lower()}')]",
-        ])
-
-    for xp in xpaths:
+    for xp in [
+        f"//*[normalize-space(text())='{target_section}']",
+        f"//*[contains(text(),'{target_section}')]",
+        f"//div[contains(@class,'card')]//h3[text()='{target_section}']",
+        f"//button[contains(.,'{target_section}')]",
+        f"//div[@role='button'][contains(.,'{target_section}')]",
+    ]:
         for elem in [e for e in driver.find_elements(By.XPATH, xp) if e.is_displayed()]:
             try:
                 driver.execute_script(
                     "arguments[0].scrollIntoView({block:'center'});"
                     "arguments[0].click();", elem)
                 time.sleep(0.08)
-                if section_form_visible():
-                    clicked = True
-                else:
-                    try:
-                        modals = driver.find_elements(By.XPATH,
-                            "//*[contains(normalize-space(.),'Select Section Type')]")
-                        if not any(m.is_displayed() for m in modals):
-                            clicked = True
-                    except:
+                try:
+                    modals = driver.find_elements(By.XPATH,
+                        "//*[contains(normalize-space(.),'Select Section Type')]")
+                    if not any(m.is_displayed() for m in modals):
                         clicked = True
+                except:
+                    clicked = True
                 if clicked:
                     progress_placeholder.success(f"  ✅ '{target_section}' selected!")
                     break
@@ -1606,17 +1435,9 @@ def select_section_type(driver, wait, target_section, progress_placeholder):
 
     if not clicked:
         progress_placeholder.warning(
-            f"⚠️ Could not auto-click '{target_section}'. Trying short recovery...")
-        for _ in range(6):
-            if section_form_visible():
-                progress_placeholder.success("  ✅ Recovered: section form is visible")
-                return True
-            try:
-                driver.find_element(By.TAG_NAME, 'body').send_keys(Keys.ESCAPE)
-            except:
-                pass
-            time.sleep(0.3)
-    return clicked or section_form_visible()
+            f"⚠️ Could not auto-click '{target_section}'. Please click manually (10s)...")
+        time.sleep(10)
+    return clicked
 
 
 # ============================================================
@@ -1664,12 +1485,10 @@ def fill_section_form(driver, section_name, time_limit, progress_placeholder):
             "//label[contains(text(),'Time Limit (in Mins)')]/..//input[@type='number']",
             "//label[contains(text(),'Time Limit')]/..//input[@type='number']",
             "//*[normalize-space(text())='Time Limit (in Mins)']/following::input[@type='number'][1]",
-            "//input[@type='number']",
         ]:
             try:
-                fields = [f for f in driver.find_elements(By.XPATH, xpath) if f.is_displayed()]
-                if fields:
-                    field = fields[0]
+                field = driver.find_element(By.XPATH, xpath)
+                if field.is_displayed():
                     current_value = field.get_attribute("value") or ""
                     progress_placeholder.info(f"    🔍 Current time limit value: '{current_value}'")
                     driver.execute_script(
@@ -1714,33 +1533,6 @@ def fill_section_form(driver, section_name, time_limit, progress_placeholder):
                 progress_placeholder.warning(
                     f"    ⚠️ Error with xpath {xpath}: {str(e)[:50]}")
                 continue
-
-        if not time_filled:
-            try:
-                js_ok = driver.execute_script("""
-                    var target = String(arguments[0]);
-                    var inputs = Array.from(document.querySelectorAll('input[type="number"], input'));
-                    var candidates = inputs.filter(function(i){
-                        if (!i || !i.offsetParent) return false;
-                        var p = (i.placeholder || '').toLowerCase();
-                        var n = (i.name || '').toLowerCase();
-                        var a = (i.getAttribute('aria-label') || '').toLowerCase();
-                        return p.includes('time') || n.includes('time') || a.includes('time') || i.type === 'number';
-                    });
-                    if (!candidates.length) return false;
-                    var field = candidates[0];
-                    field.focus();
-                    field.value = target;
-                    field.dispatchEvent(new Event('input', {bubbles: true}));
-                    field.dispatchEvent(new Event('change', {bubbles: true}));
-                    field.dispatchEvent(new Event('blur', {bubbles: true}));
-                    return (field.value || '') === target;
-                """, str(time_limit))
-                if js_ok:
-                    time_filled = True
-                    progress_placeholder.success(f"  ✅ Time limit set via JS fallback: {time_limit} mins")
-            except Exception as e:
-                progress_placeholder.warning(f"    ⚠️ JS time fallback failed: {str(e)[:60]}")
 
         if not time_filled:
             progress_placeholder.warning("  ❌ Could not fill time limit after trying all methods")
@@ -1788,26 +1580,22 @@ def handle_subject_selection(driver, progress_placeholder):
 def close_add_questions_popup(driver, progress_placeholder):
     ensure_tab_focus(driver)
     progress_placeholder.info("🔲 Closing the Add Questions popup...")
-    if poll_popup_closed(driver, timeout=0.5):
-        progress_placeholder.info("  ℹ️ Popup already closed")
-        return True
     popup_closed = False
 
     for attempt in range(5):
         try:
-            close_candidates = driver.find_elements(
-                By.CSS_SELECTOR,
-                '[data-testid="aqp-close-icon"], button[aria-label*="Close"], [aria-label="close"], .close, [class*="close"]'
-            )
-            close_btn = next((b for b in close_candidates if b.is_displayed()), None)
-            if close_btn:
+            close_btn = driver.find_element(
+                By.CSS_SELECTOR, '[data-testid="aqp-close-icon"]')
+            if close_btn and close_btn.is_displayed():
                 driver.execute_script("arguments[0].click();", close_btn)
-                if poll_popup_closed(driver, timeout=2.0):
+                still_open = not poll_popup_closed(driver, timeout=2.0)
+                if not still_open:
                     progress_placeholder.success("  ✅ Popup closed via close button!")
                     popup_closed = True
                     break
-                progress_placeholder.warning(
-                    f"  ⚠️ Popup still visible after close attempt {attempt+1}")
+                else:
+                    progress_placeholder.warning(
+                        f"  ⚠️ Popup still visible after close attempt {attempt+1}")
         except Exception as e:
             progress_placeholder.warning(
                 f"  ⚠️ Close button attempt {attempt+1}: {str(e)[:60]}")
@@ -1826,7 +1614,7 @@ def close_add_questions_popup(driver, progress_placeholder):
     if not popup_closed:
         try:
             driver.execute_script("""
-                ['[role="dialog"]', '.modal', '[data-testid="aqp-close-icon"]', '[class*="overlay"]'].forEach(
+                ['[role="dialog"]', '.modal', '[data-testid="aqp-close-icon"]'].forEach(
                     function(sel) {
                         document.querySelectorAll(sel).forEach(function(el) {
                             el.style.display = 'none';
@@ -1841,8 +1629,7 @@ def close_add_questions_popup(driver, progress_placeholder):
         except Exception as e:
             progress_placeholder.error(f"  ❌ JS popup hide failed: {str(e)[:60]}")
 
-    # Treat "not visible anymore" as success to avoid false-negative aborts.
-    return popup_closed or poll_popup_closed(driver, timeout=0.8)
+    return popup_closed
 
 
 # ============================================================
@@ -1862,21 +1649,20 @@ def click_add_section_button(driver, progress_placeholder):
         time.sleep(0.08)
 
         btn = driver.execute_script("""
-            var preferred = document.querySelector('button[data-testid="cnsf-footer-cta-button"]');
-            if (preferred && preferred.offsetParent && !preferred.disabled) return preferred;
+            var b = document.querySelector('button[data-testid="cnsf-footer-cta-button"]');
+            if (b && b.offsetParent) {
+                if ((b.innerText || b.textContent || '').includes('Add Section')) return b;
+            }
             return null;
         """)
 
         if not btn:
             btn = driver.execute_script("""
-                var buttons = document.querySelectorAll('button, a, div[role="button"]');
+                var buttons = document.querySelectorAll('button');
                 for (var i = 0; i < buttons.length; i++) {
                     var b = buttons[i];
-                    var txt = (b.innerText || b.textContent || '').trim().toLowerCase();
-                    if (!b.offsetParent) continue;
-                    if (b.disabled) continue;
-                    if (txt.includes('add section') || txt.includes('add another section') ||
-                        txt.includes('create section') || txt.includes('new section')) return b;
+                    if ((b.innerText || b.textContent || '').trim().includes('Add Section')
+                            && b.offsetParent) return b;
                 }
                 return null;
             """)
@@ -1972,11 +1758,7 @@ def click_create_new_section_button(driver, wait, progress_placeholder):
             except:
                 driver.execute_script("arguments[0].click();", btn)
                 progress_placeholder.info("  ✅ JS click on Create New Section")
-            poll_element_visible(
-                driver,
-                "//*[contains(.,'Select Section Type')] | //label[contains(text(),'Name of Section')]",
-                timeout=2.0
-            )
+            poll_element_visible(driver, "//*[contains(.,'Select Section Type')]", timeout=2.0)
             progress_placeholder.success("  🎉 'Create New Section' clicked!")
             return True
         else:
@@ -2056,85 +1838,6 @@ def click_save_and_next_button(driver, progress_placeholder):
             poll_button_visible(driver, "Save", timeout=0.7)
 
     progress_placeholder.error("  ❌ Could not find or click 'Save & Next' button")
-    return False
-
-def click_finalize_assessment_button(driver, progress_placeholder):
-    progress_placeholder.info("📌 Looking for final submit button (Create/Publish Assessment)...")
-    # Move to final step explicitly if stepper is visible.
-    try:
-        moved_to_publish_step = driver.execute_script("""
-            var nodes = document.querySelectorAll('button, a, div[role="button"], span, li');
-            for (var i = 0; i < nodes.length; i++) {
-                var n = nodes[i];
-                if (!n || !n.offsetParent) continue;
-                var txt = (n.innerText || n.textContent || '').trim().toLowerCase();
-                if (!txt) continue;
-                if (txt.includes('publish & invite') || txt.includes('3. publish')) {
-                    n.scrollIntoView({block:'center'});
-                    n.click();
-                    return true;
-                }
-            }
-            return false;
-        """)
-        if moved_to_publish_step:
-            progress_placeholder.info("  ✅ Navigated to 'Publish & Invite' step")
-            time.sleep(0.8)
-    except:
-        pass
-
-    for attempt in range(12):
-        progress_placeholder.info(f"  🔍 Finalize attempt {attempt+1}/12")
-        time.sleep(0.35)
-        btn = driver.execute_script("""
-            var nodes = document.querySelectorAll('button, a, div[role="button"]');
-            for (var i = 0; i < nodes.length; i++) {
-                var n = nodes[i];
-                if (!n || !n.offsetParent) continue;
-                if (n.disabled) continue;
-                var txt = (n.innerText || n.textContent || '').trim().toLowerCase();
-                if (!txt) continue;
-                if (txt.includes('create assessment') || txt.includes('publish assessment') ||
-                    txt === 'publish' || txt.includes('create test') ||
-                    txt === 'create' || txt.includes('submit') ||
-                    txt.includes('continue') || txt.includes('finish') ||
-                    txt.includes('invite') || txt.includes('send invite') ||
-                    txt.includes('complete') || txt.includes('done')) {
-                    n.scrollIntoView({block:'center'});
-                    return {node: n, text: txt};
-                }
-            }
-            return null;
-        """)
-        if not btn:
-            if attempt in (3, 7, 11):
-                try:
-                    visible = driver.execute_script("""
-                        var out = [];
-                        document.querySelectorAll('button, a, div[role="button"]').forEach(function(n){
-                            if (!n || !n.offsetParent) return;
-                            var txt = (n.innerText || n.textContent || '').trim();
-                            if (!txt) return;
-                            if (out.indexOf(txt) === -1) out.push(txt);
-                        });
-                        return out.slice(0, 30);
-                    """)
-                    progress_placeholder.info(f"  🔍 Final screen visible actions: {visible}")
-                except:
-                    pass
-            continue
-        try:
-            from selenium.webdriver.common.action_chains import ActionChains
-            ActionChains(driver).move_to_element(btn["node"]).pause(0.05).click().perform()
-        except:
-            driver.execute_script("arguments[0].click();", btn["node"])
-        # Any URL/state change indicates final action likely fired.
-        old_url = driver.current_url
-        poll_url_changed(driver, old_url, timeout=2.0)
-        progress_placeholder.success(f"  ✅ Final submit action clicked: '{btn.get('text','')}'")
-        return True
-
-    progress_placeholder.warning("  ⚠️ Final submit button not found/clicked; leaving at final draft page")
     return False
 
 
@@ -2251,12 +1954,6 @@ def process_section_questions(driver, questions_df, section_num, progress_placeh
 
         if not is_empty(diff):
             diff = diff.capitalize()
-        if is_empty(qlib):
-            qlib = "Topin Questions"
-        if is_empty(topic):
-            topic = ""
-        if is_empty(sub):
-            sub = ""
 
         progress_placeholder.info(
             f"  📋 QL={qlib} | Topic={topic} | Diff={diff} | Sub={sub} "
@@ -2312,7 +2009,6 @@ def process_section_questions(driver, questions_df, section_num, progress_placeh
         progress_placeholder.info("  📤 Clicking 'Add Questions →'...")
         submitted = False
 
-        disabled_seen = 0
         for submit_attempt in range(8):
             progress_placeholder.info(f"    🔁 Attempt {submit_attempt + 1}/8")
             time.sleep(0.08)
@@ -2350,12 +2046,13 @@ def process_section_questions(driver, questions_df, section_num, progress_placeh
                 f"    🎯 Found: '{btn_txt}' | disabled={btn_info.get('disabled')}")
 
             if btn_info.get('disabled'):
-                disabled_seen += 1
-                # Do not skip immediately; filters/tags can take time to apply.
-                progress_placeholder.info(
-                    f"    ⏳ Button still disabled (attempt {submit_attempt + 1}); waiting for results...")
-                time.sleep(0.8)
-                continue
+                reason = "No questions available — button disabled"
+                progress_placeholder.warning(f"  ⚠️ Row {row_num} SKIPPED — {reason}")
+                failed_rows.append({"Section": section_num, "Row": row_num, "Topic": topic,
+                                     "Difficulty": diff, "Sub Topic": sub, "Num Q": num_q,
+                                     "Marks": marks, "Reason": reason})
+                submitted = True
+                break
 
             try:
                 from selenium.webdriver.common.action_chains import ActionChains
@@ -2383,12 +2080,8 @@ def process_section_questions(driver, questions_df, section_num, progress_placeh
             break
 
         if not submitted:
-            if disabled_seen >= 8:
-                reason = "No questions available — button stayed disabled after retries"
-                progress_placeholder.warning(f"  ⚠️ Row {row_num} SKIPPED — {reason}")
-            else:
-                reason = "'Add Questions →' not clicked after 8 attempts"
-                progress_placeholder.error(f"  ❌ Row {row_num} FAILED — {reason}")
+            reason = "'Add Questions →' not clicked after 8 attempts"
+            progress_placeholder.error(f"  ❌ Row {row_num} FAILED — {reason}")
             failed_rows.append({"Section": section_num, "Row": row_num, "Topic": topic,
                                  "Difficulty": diff, "Sub Topic": sub, "Num Q": num_q,
                                  "Marks": marks, "Reason": reason})
@@ -2558,55 +2251,16 @@ def automate_all_sections(driver, wait, sections, progress_placeholder):
 # Everything else is identical to original.
 # ============================================================
 
-class UILogger:
-    def __init__(self, title="### Live Automation Logs"):
-        self.lines = []
-        self.max_lines = 1500
-        self.container = st.container()
-        self.container.markdown(title)
-        self._output = self.container.empty()
-
-    def _render(self):
-        self._output.code("\n".join(self.lines) if self.lines else "Waiting for logs...")
-
-    def _add(self, message):
-        ts = time.strftime("%H:%M:%S")
-        text = str(message)
-        parts = text.splitlines() if text else [""]
-        for part in parts:
-            self.lines.append(f"[{ts}] {part}")
-        if len(self.lines) > self.max_lines:
-            self.lines = self.lines[-self.max_lines:]
-        self._render()
-
-    def info(self, message):
-        self._add(message)
-
-    def warning(self, message):
-        self._add(message)
-
-    def error(self, message):
-        self._add(message)
-
-    def success(self, message):
-        self._add(message)
-
-    def write(self, message):
-        self._add(message)
-
 def run_automation(mobile_num, otp_code, sections, wait_time=10):
     start_time           = time.time()
     driver               = None
-    progress_placeholder = UILogger()
+    progress_placeholder = st.empty()
 
     try:
         progress_placeholder.info("🔧 Initializing browser...")
 
         options = Options()
         options.page_load_strategy = 'normal'
-        options.add_argument('--headless=new')
-        options.add_argument('--disable-gpu')
-        options.add_argument('--window-size=1920,1080')
         options.add_argument('--start-maximized')
         options.add_argument('--disable-blink-features=AutomationControlled')
         options.add_argument('--no-sandbox')
@@ -2621,113 +2275,10 @@ def run_automation(mobile_num, otp_code, sections, wait_time=10):
             "profile.default_content_setting_values.notifications": 2,
         })
 
-        chrome_binary = None
-        for env_name in ('CHROME_BINARY', 'CHROME_BIN', 'CHROME_PATH', 'GOOGLE_CHROME_SHIM'):
-            candidate = os.environ.get(env_name)
-            if candidate:
-                chrome_binary = candidate
-                break
-
-        if not chrome_binary:
-            for path in [
-                '/usr/bin/google-chrome-stable',
-                '/usr/bin/google-chrome',
-                '/usr/bin/chromium-browser',
-                '/usr/bin/chromium',
-                '/snap/bin/chromium',
-            ]:
-                if os.path.exists(path):
-                    chrome_binary = path
-                    break
-            if not chrome_binary:
-                for candidate in [
-                    'google-chrome-stable',
-                    'google-chrome',
-                    'chromium-browser',
-                    'chromium',
-                    'chrome',
-                    'chrome.exe',
-                ]:
-                    found = shutil.which(candidate)
-                    if found:
-                        chrome_binary = found
-                        break
-
-        progress_placeholder.write(
-            f"Browser detection: os.name={os.name}, chrome_binary={chrome_binary!r}"
+        driver = webdriver.Chrome(
+            service=Service(ChromeDriverManager().install()),
+            options=options
         )
-
-        remote_url = os.environ.get('REMOTE_WEBDRIVER_URL')
-        if remote_url:
-            progress_placeholder.info(f"🔧 Initializing remote WebDriver at {remote_url}")
-            driver = webdriver.Remote(
-                command_executor=remote_url,
-                options=options
-            )
-        else:
-            if chrome_binary and os.path.exists(chrome_binary):
-                options.binary_location = chrome_binary
-                progress_placeholder.info(f"🔧 Initializing headless browser using {chrome_binary}")
-            else:
-                env_hint = ' or set CHROME_BINARY/CHROME_BIN/CHROME_PATH/GOOGLE_CHROME_SHIM'
-                detected = {
-                    'CHROME_BINARY': os.environ.get('CHROME_BINARY'),
-                    'CHROME_BIN': os.environ.get('CHROME_BIN'),
-                    'CHROME_PATH': os.environ.get('CHROME_PATH'),
-                    'GOOGLE_CHROME_SHIM': os.environ.get('GOOGLE_CHROME_SHIM'),
-                    'which_google_chrome': shutil.which('google-chrome'),
-                    'which_chrome': shutil.which('chrome'),
-                    'which_chromium': shutil.which('chromium'),
-                    'which_chromium_browser': shutil.which('chromium-browser'),
-                }
-
-                if os.name == 'nt':
-                    windows_paths = [
-                        os.path.join(os.environ.get('PROGRAMFILES', ''), 'Google', 'Chrome', 'Application', 'chrome.exe'),
-                        os.path.join(os.environ.get('PROGRAMFILES(X86)', ''), 'Google', 'Chrome', 'Application', 'chrome.exe'),
-                        os.path.join(os.environ.get('LOCALAPPDATA', ''), 'Google', 'Chrome', 'Application', 'chrome.exe'),
-                    ]
-                    for path in windows_paths:
-                        if path and os.path.exists(path):
-                            chrome_binary = path
-                            options.binary_location = chrome_binary
-                            progress_placeholder.info(f"🔧 Initializing headless browser using {chrome_binary}")
-                            break
-
-                if not chrome_binary and os.name != 'nt':
-                    progress_placeholder.error(
-                        "Chrome/Chromium executable not found. "
-                        f"Set an environment variable{env_hint} to the browser path, or install Chromium in the container."
-                    )
-                    progress_placeholder.info(
-                        "Common fixes: add a Streamlit `packages.txt` with `chromium` and `chromium-driver`, "
-                        "or set `CHROME_BIN=/usr/bin/chromium` (or `/usr/bin/google-chrome`)."
-                    )
-                    progress_placeholder.write("Detected values:\n" + "\n".join(
-                        f"{k}: {v}" for k, v in detected.items()
-                    ))
-                    raise RuntimeError(
-                        "Chrome/Chromium binary not found for Selenium headless mode."
-                    )
-
-            chromedriver_path = (
-                os.environ.get("CHROMEDRIVER_PATH")
-                or shutil.which("chromedriver")
-                or shutil.which("chromium-driver")
-                or ("/usr/bin/chromedriver" if os.path.exists("/usr/bin/chromedriver") else None)
-            )
-
-            if chromedriver_path:
-                progress_placeholder.info(f"🔧 Using system ChromeDriver: {chromedriver_path}")
-                service = Service(chromedriver_path)
-            else:
-                progress_placeholder.warning(
-                    "⚠️ System ChromeDriver not found; falling back to webdriver_manager download. "
-                    "If you see a Chrome/Driver version mismatch, install `chromium-driver` or set CHROMEDRIVER_PATH."
-                )
-                service = Service(ChromeDriverManager().install())
-
-            driver = webdriver.Chrome(service=service, options=options)
         driver.set_page_load_timeout(60)
         driver.implicitly_wait(2)
         wait = WebDriverWait(driver, wait_time)
