@@ -2279,13 +2279,20 @@ def run_automation(mobile_num, otp_code, sections, wait_time=10):
             "profile.default_content_setting_values.notifications": 2,
         })
 
-        chrome_binary = os.environ.get('CHROME_BINARY')
+        chrome_binary = None
+        for env_name in ('CHROME_BINARY', 'CHROME_BIN', 'CHROME_PATH', 'GOOGLE_CHROME_SHIM'):
+            candidate = os.environ.get(env_name)
+            if candidate:
+                chrome_binary = candidate
+                break
+
         if not chrome_binary:
             for path in [
                 '/usr/bin/google-chrome-stable',
                 '/usr/bin/google-chrome',
                 '/usr/bin/chromium-browser',
                 '/usr/bin/chromium',
+                '/snap/bin/chromium',
             ]:
                 if os.path.exists(path):
                     chrome_binary = path
@@ -2295,9 +2302,10 @@ def run_automation(mobile_num, otp_code, sections, wait_time=10):
             options.binary_location = chrome_binary
             progress_placeholder.info(f"🔧 Initializing headless browser using {chrome_binary}")
         else:
+            env_hint = ' or set CHROME_BINARY/CHROME_BIN/CHROME_PATH/GOOGLE_CHROME_SHIM'
             progress_placeholder.error(
                 "Chrome/Chromium executable not found. "
-                "Set CHROME_BINARY environment variable to the browser path or install Chromium in the container."
+                f"Set an environment variable{env_hint} to the browser path, or install Chromium in the container."
             )
             raise RuntimeError(
                 "Chrome/Chromium binary not found for Selenium headless mode."
