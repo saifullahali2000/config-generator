@@ -2060,6 +2060,29 @@ def click_save_and_next_button(driver, progress_placeholder):
 
 def click_finalize_assessment_button(driver, progress_placeholder):
     progress_placeholder.info("📌 Looking for final submit button (Create/Publish Assessment)...")
+    # Move to final step explicitly if stepper is visible.
+    try:
+        moved_to_publish_step = driver.execute_script("""
+            var nodes = document.querySelectorAll('button, a, div[role="button"], span, li');
+            for (var i = 0; i < nodes.length; i++) {
+                var n = nodes[i];
+                if (!n || !n.offsetParent) continue;
+                var txt = (n.innerText || n.textContent || '').trim().toLowerCase();
+                if (!txt) continue;
+                if (txt.includes('publish & invite') || txt.includes('3. publish')) {
+                    n.scrollIntoView({block:'center'});
+                    n.click();
+                    return true;
+                }
+            }
+            return false;
+        """)
+        if moved_to_publish_step:
+            progress_placeholder.info("  ✅ Navigated to 'Publish & Invite' step")
+            time.sleep(0.8)
+    except:
+        pass
+
     for attempt in range(12):
         progress_placeholder.info(f"  🔍 Finalize attempt {attempt+1}/12")
         time.sleep(0.35)
@@ -2074,7 +2097,9 @@ def click_finalize_assessment_button(driver, progress_placeholder):
                 if (txt.includes('create assessment') || txt.includes('publish assessment') ||
                     txt === 'publish' || txt.includes('create test') ||
                     txt === 'create' || txt.includes('submit') ||
-                    txt.includes('continue') || txt.includes('finish')) {
+                    txt.includes('continue') || txt.includes('finish') ||
+                    txt.includes('invite') || txt.includes('send invite') ||
+                    txt.includes('complete') || txt.includes('done')) {
                     n.scrollIntoView({block:'center'});
                     return {node: n, text: txt};
                 }
@@ -2421,8 +2446,9 @@ def automate_all_sections(driver, wait, sections, progress_placeholder):
                 f"  ⚠️ Section {sec_num} has no question rows — skipping question loop")
 
         if not close_add_questions_popup(driver, progress_placeholder):
-            progress_placeholder.warning(
-                f"  ⚠️ Could not reliably confirm popup close after Section {sec_num} — continuing")
+            progress_placeholder.error(
+                f"  ❌ Could not close popup after Section {sec_num} — aborting")
+            return False
 
         poll_element_visible(driver, "//*[contains(text(),'Coding') or contains(text(),'Save')]", timeout=0.5)
 
@@ -2464,14 +2490,16 @@ def automate_all_sections(driver, wait, sections, progress_placeholder):
         else:
             progress_placeholder.info(f"  ℹ️ Section type '{sec_type}' is not coding-related — skipping")
 
+        if not click_add_section_button(driver, progress_placeholder):
+            progress_placeholder.error(
+                f"  ❌ Could not click 'Add Section →' for Section {sec_num} — aborting")
+            return False
+
         if is_last:
             progress_placeholder.info(
                 f"🏁 Section {sec_num} is the LAST section — clicking 'Save & Next'")
             if not click_save_and_next_button(driver, progress_placeholder):
                 return False
-
-            # Some flows require one more explicit final create/publish click.
-            click_finalize_assessment_button(driver, progress_placeholder)
 
             progress_placeholder.info("🔗 Capturing final URL...")
             _old = driver.current_url
@@ -2512,10 +2540,6 @@ def automate_all_sections(driver, wait, sections, progress_placeholder):
                 return False
 
         else:
-            if not click_add_section_button(driver, progress_placeholder):
-                progress_placeholder.error(
-                    f"  ❌ Could not click 'Add Section →' for Section {sec_num} — aborting")
-                return False
             progress_placeholder.info(
                 f"➡️ Section {sec_num} done — creating Section {sec_num + 1}...")
             if not click_create_new_section_button(driver, wait, progress_placeholder):
@@ -2811,32 +2835,18 @@ def run_automation(mobile_num, otp_code, sections, wait_time=10):
         progress_placeholder.success("✅ Login Successful!")
 
         progress_placeholder.info("🚀 Step 3: Navigating to Create Assessment...")
-        open_assessment_builder(driver, wait_time, progress_placeholder)
+        find_and_click(
+            driver, "//*[contains(text(), 'Create Assessment')]", timeout=wait_time)
+        find_and_click(
+            driver, "//*[contains(text(), 'Custom Assessment')]", timeout=wait_time)
 
         progress_placeholder.info("➕ Step 4: Creating Section 1...")
-        sec_clicked = find_and_click(driver,
+        find_and_click(driver,
             "//*[contains(text(),'Create new Section') or "
             "contains(text(),'Create New Section')]",
             timeout=wait_time)
-        if not sec_clicked:
-            sec_clicked = click_text_button(driver, ["create", "section"])
-        if not sec_clicked:
-            raise RuntimeError("Could not click 'Create New Section'")
 
         handle_subject_selection(driver, progress_placeholder)
-
-        if not builder_ready(driver):
-            # One recovery attempt: sometimes section button click is swallowed.
-            progress_placeholder.warning("⚠️ Builder not ready after section click; retrying once...")
-            sec_clicked = find_and_click(driver,
-                "//*[contains(text(),'Create new Section') or contains(text(),'Create New Section')]",
-                timeout=4)
-            if not sec_clicked:
-                sec_clicked = click_text_button(driver, ["create", "section"])
-            if not builder_ready(driver):
-                raise RuntimeError(
-                    "Not in section builder screen (still on dashboard or wrong page state)."
-                )
 
         sec1_type = sections[0]["section_type"]
         progress_placeholder.info(f"🎯 Selecting type for Section 1: '{sec1_type}'")
