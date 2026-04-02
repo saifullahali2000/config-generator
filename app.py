@@ -2298,6 +2298,19 @@ def run_automation(mobile_num, otp_code, sections, wait_time=10):
                 if os.path.exists(path):
                     chrome_binary = path
                     break
+            if not chrome_binary:
+                for candidate in [
+                    'google-chrome-stable',
+                    'google-chrome',
+                    'chromium-browser',
+                    'chromium',
+                    'chrome',
+                    'chrome.exe',
+                ]:
+                    found = shutil.which(candidate)
+                    if found:
+                        chrome_binary = found
+                        break
 
         remote_url = os.environ.get('REMOTE_WEBDRIVER_URL')
         if remote_url:
@@ -2340,6 +2353,10 @@ def run_automation(mobile_num, otp_code, sections, wait_time=10):
                     progress_placeholder.error(
                         "Chrome/Chromium executable not found. "
                         f"Set an environment variable{env_hint} to the browser path, or install Chromium in the container."
+                    )
+                    progress_placeholder.info(
+                        "Common fixes: add a Streamlit `packages.txt` with `chromium` and `chromium-driver`, "
+                        "or set `CHROME_BIN=/usr/bin/chromium` (or `/usr/bin/google-chrome`)."
                     )
                     progress_placeholder.write("Detected values:\n" + "\n".join(
                         f"{k}: {v}" for k, v in detected.items()
