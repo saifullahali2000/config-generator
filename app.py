@@ -2060,9 +2060,9 @@ def click_save_and_next_button(driver, progress_placeholder):
 
 def click_finalize_assessment_button(driver, progress_placeholder):
     progress_placeholder.info("📌 Looking for final submit button (Create/Publish Assessment)...")
-    for attempt in range(10):
-        progress_placeholder.info(f"  🔍 Finalize attempt {attempt+1}/10")
-        time.sleep(0.2)
+    for attempt in range(12):
+        progress_placeholder.info(f"  🔍 Finalize attempt {attempt+1}/12")
+        time.sleep(0.35)
         btn = driver.execute_script("""
             var nodes = document.querySelectorAll('button, a, div[role="button"]');
             for (var i = 0; i < nodes.length; i++) {
@@ -2072,24 +2072,41 @@ def click_finalize_assessment_button(driver, progress_placeholder):
                 var txt = (n.innerText || n.textContent || '').trim().toLowerCase();
                 if (!txt) continue;
                 if (txt.includes('create assessment') || txt.includes('publish assessment') ||
-                    txt === 'publish' || txt.includes('create test')) {
+                    txt === 'publish' || txt.includes('create test') ||
+                    txt === 'create' || txt.includes('submit') ||
+                    txt.includes('continue') || txt.includes('finish')) {
                     n.scrollIntoView({block:'center'});
-                    return n;
+                    return {node: n, text: txt};
                 }
             }
             return null;
         """)
         if not btn:
+            if attempt in (3, 7, 11):
+                try:
+                    visible = driver.execute_script("""
+                        var out = [];
+                        document.querySelectorAll('button, a, div[role="button"]').forEach(function(n){
+                            if (!n || !n.offsetParent) return;
+                            var txt = (n.innerText || n.textContent || '').trim();
+                            if (!txt) return;
+                            if (out.indexOf(txt) === -1) out.push(txt);
+                        });
+                        return out.slice(0, 30);
+                    """)
+                    progress_placeholder.info(f"  🔍 Final screen visible actions: {visible}")
+                except:
+                    pass
             continue
         try:
             from selenium.webdriver.common.action_chains import ActionChains
-            ActionChains(driver).move_to_element(btn).pause(0.05).click().perform()
+            ActionChains(driver).move_to_element(btn["node"]).pause(0.05).click().perform()
         except:
-            driver.execute_script("arguments[0].click();", btn)
+            driver.execute_script("arguments[0].click();", btn["node"])
         # Any URL/state change indicates final action likely fired.
         old_url = driver.current_url
         poll_url_changed(driver, old_url, timeout=2.0)
-        progress_placeholder.success("  ✅ Final submit action clicked")
+        progress_placeholder.success(f"  ✅ Final submit action clicked: '{btn.get('text','')}'")
         return True
 
     progress_placeholder.warning("  ⚠️ Final submit button not found/clicked; leaving at final draft page")
@@ -2447,11 +2464,6 @@ def automate_all_sections(driver, wait, sections, progress_placeholder):
         else:
             progress_placeholder.info(f"  ℹ️ Section type '{sec_type}' is not coding-related — skipping")
 
-        if not click_add_section_button(driver, progress_placeholder):
-            progress_placeholder.error(
-                f"  ❌ Could not click 'Add Section →' for Section {sec_num} — aborting")
-            return False
-
         if is_last:
             progress_placeholder.info(
                 f"🏁 Section {sec_num} is the LAST section — clicking 'Save & Next'")
@@ -2500,6 +2512,10 @@ def automate_all_sections(driver, wait, sections, progress_placeholder):
                 return False
 
         else:
+            if not click_add_section_button(driver, progress_placeholder):
+                progress_placeholder.error(
+                    f"  ❌ Could not click 'Add Section →' for Section {sec_num} — aborting")
+                return False
             progress_placeholder.info(
                 f"➡️ Section {sec_num} done — creating Section {sec_num + 1}...")
             if not click_create_new_section_button(driver, wait, progress_placeholder):
