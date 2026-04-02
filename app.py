@@ -1448,6 +1448,10 @@ def select_section_type(driver, wait, target_section, progress_placeholder):
 
 def fill_section_form(driver, section_name, time_limit, progress_placeholder):
     progress_placeholder.info("📝 Filling section form...")
+    # Normalize values like "90 min"/"90 mins" to plain number for numeric fields.
+    time_limit_clean = "".join(ch for ch in str(time_limit) if ch.isdigit()) if time_limit else ""
+    if time_limit and time_limit_clean:
+        time_limit = time_limit_clean
 
     if section_name:
         name_filled = False
@@ -1956,6 +1960,12 @@ def process_section_questions(driver, questions_df, section_num, progress_placeh
 
         if not is_empty(diff):
             diff = diff.capitalize()
+        if is_empty(qlib):
+            qlib = "Topin Questions"
+        if is_empty(topic):
+            topic = ""
+        if is_empty(sub):
+            sub = ""
 
         progress_placeholder.info(
             f"  📋 QL={qlib} | Topic={topic} | Diff={diff} | Sub={sub} "
@@ -2010,6 +2020,7 @@ def process_section_questions(driver, questions_df, section_num, progress_placeh
 
         progress_placeholder.info("  📤 Clicking 'Add Questions →'...")
         submitted = False
+        disabled_seen = 0
 
         for submit_attempt in range(8):
             progress_placeholder.info(f"    🔁 Attempt {submit_attempt + 1}/8")
@@ -2048,13 +2059,11 @@ def process_section_questions(driver, questions_df, section_num, progress_placeh
                 f"    🎯 Found: '{btn_txt}' | disabled={btn_info.get('disabled')}")
 
             if btn_info.get('disabled'):
-                reason = "No questions available — button disabled"
-                progress_placeholder.warning(f"  ⚠️ Row {row_num} SKIPPED — {reason}")
-                failed_rows.append({"Section": section_num, "Row": row_num, "Topic": topic,
-                                     "Difficulty": diff, "Sub Topic": sub, "Num Q": num_q,
-                                     "Marks": marks, "Reason": reason})
-                submitted = True
-                break
+                disabled_seen += 1
+                progress_placeholder.info(
+                    f"    ⏳ Button still disabled (attempt {submit_attempt+1}); waiting...")
+                time.sleep(0.8)
+                continue
 
             try:
                 from selenium.webdriver.common.action_chains import ActionChains
@@ -2082,8 +2091,12 @@ def process_section_questions(driver, questions_df, section_num, progress_placeh
             break
 
         if not submitted:
-            reason = "'Add Questions →' not clicked after 8 attempts"
-            progress_placeholder.error(f"  ❌ Row {row_num} FAILED — {reason}")
+            if disabled_seen >= 8:
+                reason = "No questions available — button stayed disabled after retries"
+                progress_placeholder.warning(f"  ⚠️ Row {row_num} SKIPPED — {reason}")
+            else:
+                reason = "'Add Questions →' not clicked after 8 attempts"
+                progress_placeholder.error(f"  ❌ Row {row_num} FAILED — {reason}")
             failed_rows.append({"Section": section_num, "Row": row_num, "Topic": topic,
                                  "Difficulty": diff, "Sub Topic": sub, "Num Q": num_q,
                                  "Marks": marks, "Reason": reason})
