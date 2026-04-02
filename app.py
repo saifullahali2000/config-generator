@@ -1582,22 +1582,26 @@ def handle_subject_selection(driver, progress_placeholder):
 def close_add_questions_popup(driver, progress_placeholder):
     ensure_tab_focus(driver)
     progress_placeholder.info("🔲 Closing the Add Questions popup...")
+    if poll_popup_closed(driver, timeout=0.5):
+        progress_placeholder.info("  ℹ️ Popup already closed")
+        return True
     popup_closed = False
 
     for attempt in range(5):
         try:
-            close_btn = driver.find_element(
-                By.CSS_SELECTOR, '[data-testid="aqp-close-icon"]')
-            if close_btn and close_btn.is_displayed():
+            close_candidates = driver.find_elements(
+                By.CSS_SELECTOR,
+                '[data-testid="aqp-close-icon"], button[aria-label*="Close"], [aria-label="close"], .close, [class*="close"]'
+            )
+            close_btn = next((b for b in close_candidates if b.is_displayed()), None)
+            if close_btn:
                 driver.execute_script("arguments[0].click();", close_btn)
-                still_open = not poll_popup_closed(driver, timeout=2.0)
-                if not still_open:
+                if poll_popup_closed(driver, timeout=2.0):
                     progress_placeholder.success("  ✅ Popup closed via close button!")
                     popup_closed = True
                     break
-                else:
-                    progress_placeholder.warning(
-                        f"  ⚠️ Popup still visible after close attempt {attempt+1}")
+                progress_placeholder.warning(
+                    f"  ⚠️ Popup still visible after close attempt {attempt+1}")
         except Exception as e:
             progress_placeholder.warning(
                 f"  ⚠️ Close button attempt {attempt+1}: {str(e)[:60]}")
@@ -1616,7 +1620,7 @@ def close_add_questions_popup(driver, progress_placeholder):
     if not popup_closed:
         try:
             driver.execute_script("""
-                ['[role="dialog"]', '.modal', '[data-testid="aqp-close-icon"]'].forEach(
+                ['[role="dialog"]', '.modal', '[data-testid="aqp-close-icon"]', '[class*="overlay"]'].forEach(
                     function(sel) {
                         document.querySelectorAll(sel).forEach(function(el) {
                             el.style.display = 'none';
@@ -1631,7 +1635,8 @@ def close_add_questions_popup(driver, progress_placeholder):
         except Exception as e:
             progress_placeholder.error(f"  ❌ JS popup hide failed: {str(e)[:60]}")
 
-    return popup_closed
+    # Treat "not visible anymore" as success to avoid false-negative aborts.
+    return popup_closed or poll_popup_closed(driver, timeout=0.8)
 
 
 # ============================================================
@@ -2141,9 +2146,8 @@ def automate_all_sections(driver, wait, sections, progress_placeholder):
                 f"  ⚠️ Section {sec_num} has no question rows — skipping question loop")
 
         if not close_add_questions_popup(driver, progress_placeholder):
-            progress_placeholder.error(
-                f"  ❌ Could not close popup after Section {sec_num} — aborting")
-            return False
+            progress_placeholder.warning(
+                f"  ⚠️ Could not reliably confirm popup close after Section {sec_num} — continuing")
 
         poll_element_visible(driver, "//*[contains(text(),'Coding') or contains(text(),'Save')]", timeout=0.5)
 
