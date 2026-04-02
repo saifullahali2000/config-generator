@@ -1399,6 +1399,16 @@ def set_default_coding_language(driver, language, progress_placeholder):
 
 def select_section_type(driver, wait, target_section, progress_placeholder):
     progress_placeholder.info(f"🎯 Selecting section type: '{target_section}'...")
+    section_aliases = {
+        "mcq": ["mcq", "multiple choice", "multiple-choice", "objective"],
+        "textual": ["textual", "subjective", "descriptive", "essay"],
+        "coding": ["coding", "ide based coding", "ide coding"],
+        "sql": ["sql", "sql coding"],
+        "web coding": ["web coding", "frontend coding", "web"],
+    }
+    normalized = (target_section or "").strip().lower()
+    search_terms = section_aliases.get(normalized, [normalized, target_section])
+
     def section_form_visible():
         return poll_element_visible(
             driver,
@@ -1419,13 +1429,19 @@ def select_section_type(driver, wait, target_section, progress_placeholder):
         progress_placeholder.info("  ℹ️ Modal title not found; trying direct section click")
 
     clicked = False
-    for xp in [
-        f"//*[normalize-space(text())='{target_section}']",
-        f"//*[contains(text(),'{target_section}')]",
-        f"//div[contains(@class,'card')]//h3[text()='{target_section}']",
-        f"//button[contains(.,'{target_section}')]",
-        f"//div[@role='button'][contains(.,'{target_section}')]",
-    ]:
+    xpaths = []
+    for term in search_terms:
+        if not term:
+            continue
+        xpaths.extend([
+            f"//*[translate(normalize-space(text()), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz')='{term.lower()}']",
+            f"//*[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '{term.lower()}')]",
+            f"//div[contains(@class,'card')]//*[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '{term.lower()}')]",
+            f"//button[contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '{term.lower()}')]",
+            f"//div[@role='button'][contains(translate(., 'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz'), '{term.lower()}')]",
+        ])
+
+    for xp in xpaths:
         for elem in [e for e in driver.find_elements(By.XPATH, xp) if e.is_displayed()]:
             try:
                 driver.execute_script(
@@ -1510,10 +1526,12 @@ def fill_section_form(driver, section_name, time_limit, progress_placeholder):
             "//label[contains(text(),'Time Limit (in Mins)')]/..//input[@type='number']",
             "//label[contains(text(),'Time Limit')]/..//input[@type='number']",
             "//*[normalize-space(text())='Time Limit (in Mins)']/following::input[@type='number'][1]",
+            "//input[@type='number']",
         ]:
             try:
-                field = driver.find_element(By.XPATH, xpath)
-                if field.is_displayed():
+                fields = [f for f in driver.find_elements(By.XPATH, xpath) if f.is_displayed()]
+                if fields:
+                    field = fields[0]
                     current_value = field.get_attribute("value") or ""
                     progress_placeholder.info(f"    🔍 Current time limit value: '{current_value}'")
                     driver.execute_script(
@@ -1558,6 +1576,33 @@ def fill_section_form(driver, section_name, time_limit, progress_placeholder):
                 progress_placeholder.warning(
                     f"    ⚠️ Error with xpath {xpath}: {str(e)[:50]}")
                 continue
+
+        if not time_filled:
+            try:
+                js_ok = driver.execute_script("""
+                    var target = String(arguments[0]);
+                    var inputs = Array.from(document.querySelectorAll('input[type="number"], input'));
+                    var candidates = inputs.filter(function(i){
+                        if (!i || !i.offsetParent) return false;
+                        var p = (i.placeholder || '').toLowerCase();
+                        var n = (i.name || '').toLowerCase();
+                        var a = (i.getAttribute('aria-label') || '').toLowerCase();
+                        return p.includes('time') || n.includes('time') || a.includes('time') || i.type === 'number';
+                    });
+                    if (!candidates.length) return false;
+                    var field = candidates[0];
+                    field.focus();
+                    field.value = target;
+                    field.dispatchEvent(new Event('input', {bubbles: true}));
+                    field.dispatchEvent(new Event('change', {bubbles: true}));
+                    field.dispatchEvent(new Event('blur', {bubbles: true}));
+                    return (field.value || '') === target;
+                """, str(time_limit))
+                if js_ok:
+                    time_filled = True
+                    progress_placeholder.success(f"  ✅ Time limit set via JS fallback: {time_limit} mins")
+            except Exception as e:
+                progress_placeholder.warning(f"    ⚠️ JS time fallback failed: {str(e)[:60]}")
 
         if not time_filled:
             progress_placeholder.warning("  ❌ Could not fill time limit after trying all methods")
@@ -1679,20 +1724,21 @@ def click_add_section_button(driver, progress_placeholder):
         time.sleep(0.08)
 
         btn = driver.execute_script("""
-            var b = document.querySelector('button[data-testid="cnsf-footer-cta-button"]');
-            if (b && b.offsetParent) {
-                if ((b.innerText || b.textContent || '').includes('Add Section')) return b;
-            }
+            var preferred = document.querySelector('button[data-testid="cnsf-footer-cta-button"]');
+            if (preferred && preferred.offsetParent && !preferred.disabled) return preferred;
             return null;
         """)
 
         if not btn:
             btn = driver.execute_script("""
-                var buttons = document.querySelectorAll('button');
+                var buttons = document.querySelectorAll('button, a, div[role="button"]');
                 for (var i = 0; i < buttons.length; i++) {
                     var b = buttons[i];
-                    if ((b.innerText || b.textContent || '').trim().includes('Add Section')
-                            && b.offsetParent) return b;
+                    var txt = (b.innerText || b.textContent || '').trim().toLowerCase();
+                    if (!b.offsetParent) continue;
+                    if (b.disabled) continue;
+                    if (txt.includes('add section') || txt.includes('add another section') ||
+                        txt.includes('create section') || txt.includes('new section')) return b;
                 }
                 return null;
             """)
@@ -2284,10 +2330,46 @@ def automate_all_sections(driver, wait, sections, progress_placeholder):
 # Everything else is identical to original.
 # ============================================================
 
+class UILogger:
+    def __init__(self, title="### Live Automation Logs"):
+        self.lines = []
+        self.max_lines = 1500
+        self.container = st.container()
+        self.container.markdown(title)
+        self._output = self.container.empty()
+
+    def _render(self):
+        self._output.code("\n".join(self.lines) if self.lines else "Waiting for logs...")
+
+    def _add(self, message):
+        ts = time.strftime("%H:%M:%S")
+        text = str(message)
+        parts = text.splitlines() if text else [""]
+        for part in parts:
+            self.lines.append(f"[{ts}] {part}")
+        if len(self.lines) > self.max_lines:
+            self.lines = self.lines[-self.max_lines:]
+        self._render()
+
+    def info(self, message):
+        self._add(message)
+
+    def warning(self, message):
+        self._add(message)
+
+    def error(self, message):
+        self._add(message)
+
+    def success(self, message):
+        self._add(message)
+
+    def write(self, message):
+        self._add(message)
+
 def run_automation(mobile_num, otp_code, sections, wait_time=10):
     start_time           = time.time()
     driver               = None
-    progress_placeholder = st.empty()
+    progress_placeholder = UILogger()
 
     try:
         progress_placeholder.info("🔧 Initializing browser...")
