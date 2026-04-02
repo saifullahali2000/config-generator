@@ -2253,10 +2253,45 @@ def automate_all_sections(driver, wait, sections, progress_placeholder):
 # Everything else is identical to original.
 # ============================================================
 
+class UILogger:
+    def __init__(self, title="### Live Automation Logs"):
+        self.lines = []
+        self.max_lines = 2000
+        self.container = st.container()
+        self.container.markdown(title)
+        self.output = self.container.empty()
+
+    def _render(self):
+        self.output.code("\n".join(self.lines) if self.lines else "Waiting for logs...")
+
+    def _add(self, message):
+        ts = time.strftime("%H:%M:%S")
+        text = str(message)
+        for line in (text.splitlines() if text else [""]):
+            self.lines.append(f"[{ts}] {line}")
+        if len(self.lines) > self.max_lines:
+            self.lines = self.lines[-self.max_lines:]
+        self._render()
+
+    def info(self, message):
+        self._add(message)
+
+    def warning(self, message):
+        self._add(message)
+
+    def error(self, message):
+        self._add(message)
+
+    def success(self, message):
+        self._add(message)
+
+    def write(self, message):
+        self._add(message)
+
 def run_automation(mobile_num, otp_code, sections, wait_time=10):
     start_time           = time.time()
     driver               = None
-    progress_placeholder = st.empty()
+    progress_placeholder = UILogger()
 
     try:
         progress_placeholder.info("🔧 Initializing browser...")
