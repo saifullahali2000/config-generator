@@ -1,3 +1,4 @@
+import os
 import streamlit as st
 import pandas as pd
 import time
@@ -2261,6 +2262,9 @@ def run_automation(mobile_num, otp_code, sections, wait_time=10):
 
         options = Options()
         options.page_load_strategy = 'normal'
+        options.add_argument('--headless=new')
+        options.add_argument('--disable-gpu')
+        options.add_argument('--window-size=1920,1080')
         options.add_argument('--start-maximized')
         options.add_argument('--disable-blink-features=AutomationControlled')
         options.add_argument('--no-sandbox')
@@ -2274,6 +2278,30 @@ def run_automation(mobile_num, otp_code, sections, wait_time=10):
         options.add_experimental_option("prefs", {
             "profile.default_content_setting_values.notifications": 2,
         })
+
+        chrome_binary = os.environ.get('CHROME_BINARY')
+        if not chrome_binary:
+            for path in [
+                '/usr/bin/google-chrome-stable',
+                '/usr/bin/google-chrome',
+                '/usr/bin/chromium-browser',
+                '/usr/bin/chromium',
+            ]:
+                if os.path.exists(path):
+                    chrome_binary = path
+                    break
+
+        if chrome_binary and os.path.exists(chrome_binary):
+            options.binary_location = chrome_binary
+            progress_placeholder.info(f"🔧 Initializing headless browser using {chrome_binary}")
+        else:
+            progress_placeholder.error(
+                "Chrome/Chromium executable not found. "
+                "Set CHROME_BINARY environment variable to the browser path or install Chromium in the container."
+            )
+            raise RuntimeError(
+                "Chrome/Chromium binary not found for Selenium headless mode."
+            )
 
         driver = webdriver.Chrome(
             service=Service(ChromeDriverManager().install()),
