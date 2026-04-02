@@ -1399,12 +1399,24 @@ def set_default_coding_language(driver, language, progress_placeholder):
 
 def select_section_type(driver, wait, target_section, progress_placeholder):
     progress_placeholder.info(f"🎯 Selecting section type: '{target_section}'...")
+    def section_form_visible():
+        return poll_element_visible(
+            driver,
+            "//label[contains(text(),'Name of Section')] | "
+            "//label[contains(text(),'Name of section')] | "
+            "//input[@placeholder='Name of Section']",
+            timeout=0.6
+        )
+
     try:
         wait.until(EC.presence_of_element_located(
             (By.XPATH, "//*[contains(., 'Select Section Type')]")))
         progress_placeholder.info("  ✅ Section type modal loaded")
     except:
-        progress_placeholder.warning("  ⚠️ Could not confirm modal — continuing")
+        if section_form_visible():
+            progress_placeholder.info("  ℹ️ Section form already visible; section type likely selected")
+            return True
+        progress_placeholder.info("  ℹ️ Modal title not found; trying direct section click")
 
     clicked = False
     for xp in [
@@ -1420,13 +1432,16 @@ def select_section_type(driver, wait, target_section, progress_placeholder):
                     "arguments[0].scrollIntoView({block:'center'});"
                     "arguments[0].click();", elem)
                 time.sleep(0.08)
-                try:
-                    modals = driver.find_elements(By.XPATH,
-                        "//*[contains(normalize-space(.),'Select Section Type')]")
-                    if not any(m.is_displayed() for m in modals):
-                        clicked = True
-                except:
+                if section_form_visible():
                     clicked = True
+                else:
+                    try:
+                        modals = driver.find_elements(By.XPATH,
+                            "//*[contains(normalize-space(.),'Select Section Type')]")
+                        if not any(m.is_displayed() for m in modals):
+                            clicked = True
+                    except:
+                        clicked = True
                 if clicked:
                     progress_placeholder.success(f"  ✅ '{target_section}' selected!")
                     break
@@ -1437,9 +1452,17 @@ def select_section_type(driver, wait, target_section, progress_placeholder):
 
     if not clicked:
         progress_placeholder.warning(
-            f"⚠️ Could not auto-click '{target_section}'. Please click manually (10s)...")
-        time.sleep(10)
-    return clicked
+            f"⚠️ Could not auto-click '{target_section}'. Trying short recovery...")
+        for _ in range(6):
+            if section_form_visible():
+                progress_placeholder.success("  ✅ Recovered: section form is visible")
+                return True
+            try:
+                driver.find_element(By.TAG_NAME, 'body').send_keys(Keys.ESCAPE)
+            except:
+                pass
+            time.sleep(0.3)
+    return clicked or section_form_visible()
 
 
 # ============================================================
@@ -1765,7 +1788,11 @@ def click_create_new_section_button(driver, wait, progress_placeholder):
             except:
                 driver.execute_script("arguments[0].click();", btn)
                 progress_placeholder.info("  ✅ JS click on Create New Section")
-            poll_element_visible(driver, "//*[contains(.,'Select Section Type')]", timeout=2.0)
+            poll_element_visible(
+                driver,
+                "//*[contains(.,'Select Section Type')] | //label[contains(text(),'Name of Section')]",
+                timeout=2.0
+            )
             progress_placeholder.success("  🎉 'Create New Section' clicked!")
             return True
         else:
