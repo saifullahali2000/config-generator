@@ -2261,6 +2261,10 @@ def run_automation(mobile_num, otp_code, sections, wait_time=10):
 
         options = Options()
         options.page_load_strategy = 'normal'
+        options.add_argument('--headless=new')
+        options.add_argument('--disable-gpu')
+        options.add_argument('--window-size=1920,1080')
+        options.add_argument('--remote-debugging-port=9222')
         options.add_argument('--start-maximized')
         options.add_argument('--disable-blink-features=AutomationControlled')
         options.add_argument('--no-sandbox')
@@ -2275,10 +2279,27 @@ def run_automation(mobile_num, otp_code, sections, wait_time=10):
             "profile.default_content_setting_values.notifications": 2,
         })
 
-        driver = webdriver.Chrome(
-            service=Service(ChromeDriverManager().install()),
-            options=options
+        chrome_binary = (
+            os.environ.get("CHROME_BINARY")
+            or os.environ.get("CHROME_BIN")
+            or shutil.which("chromium")
+            or shutil.which("google-chrome")
+            or "/usr/bin/chromium"
         )
+        if chrome_binary and os.path.exists(chrome_binary):
+            options.binary_location = chrome_binary
+
+        chromedriver_path = (
+            os.environ.get("CHROMEDRIVER_PATH")
+            or shutil.which("chromedriver")
+            or "/usr/bin/chromedriver"
+        )
+        if chromedriver_path and os.path.exists(chromedriver_path):
+            service = Service(chromedriver_path)
+        else:
+            service = Service(ChromeDriverManager().install())
+
+        driver = webdriver.Chrome(service=service, options=options)
         driver.set_page_load_timeout(60)
         driver.implicitly_wait(2)
         wait = WebDriverWait(driver, wait_time)
