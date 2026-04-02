@@ -407,8 +407,50 @@ def debug_visible_actions(driver):
     except:
         return []
 
+def switch_to_frame_with_assessment_actions(driver):
+    try:
+        driver.switch_to.default_content()
+    except:
+        pass
+    try:
+        if click_text_button(driver, ["create", "assessment"]):
+            return True
+    except:
+        pass
+
+    try:
+        frames = driver.find_elements(By.TAG_NAME, "iframe")
+    except:
+        frames = []
+
+    for i in range(len(frames)):
+        try:
+            driver.switch_to.default_content()
+            frames = driver.find_elements(By.TAG_NAME, "iframe")
+            if i >= len(frames):
+                continue
+            driver.switch_to.frame(frames[i])
+            if click_text_button(driver, ["create", "assessment"]):
+                return True
+        except:
+            continue
+    try:
+        driver.switch_to.default_content()
+    except:
+        pass
+    return False
+
 
 def open_assessment_builder(driver, wait_time, progress_placeholder):
+    # Let post-login SPA content settle before menu interactions.
+    time.sleep(1.5)
+    try:
+        progress_placeholder.write(
+            f"Step 3 context: url={driver.current_url}, title={driver.title}"
+        )
+    except:
+        pass
+
     create_assessment_xpaths = [
         "//*[contains(text(), 'Create Assessment')]",
         "//*[contains(translate(text(),'ABCDEFGHIJKLMNOPQRSTUVWXYZ','abcdefghijklmnopqrstuvwxyz'),'create assessment')]",
@@ -425,9 +467,10 @@ def open_assessment_builder(driver, wait_time, progress_placeholder):
             break
     else:
         if not click_text_button(driver, ["create", "assessment"]):
-            btns = debug_visible_actions(driver)
-            progress_placeholder.write(f"Visible actions near Step 3: {btns}")
-            raise RuntimeError("Could not click 'Create Assessment'")
+            if not switch_to_frame_with_assessment_actions(driver):
+                btns = debug_visible_actions(driver)
+                progress_placeholder.write(f"Visible actions near Step 3: {btns}")
+                raise RuntimeError("Could not click 'Create Assessment'")
 
     poll_element_visible(driver, "//*[contains(.,'Assessment')]", timeout=2.0)
 
